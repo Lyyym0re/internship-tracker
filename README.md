@@ -1,21 +1,22 @@
 # Internship Tracker
 
-API для учёта откликов на стажировки. Позволяет сохранять отклики, просматривать их и отслеживать переход от подачи заявки до собеседования, оффера или отказа.
+API для учёта откликов на стажировки. Можно сохранить отклик, посмотреть список, отфильтровать его по статусу, обновить статус и удалить запись.
 
-Стек проекта — Python, FastAPI, PostgreSQL, psycopg 3 и pytest.
+Приложение написано на Python и FastAPI. Данные хранятся в PostgreSQL. Обработчики выполняют запросы через общий асинхронный пул psycopg 3, который открывается при запуске и закрывается при остановке сервера.
 
 | Метод | Маршрут | Действие |
 | --- | --- | --- |
-| POST | `/applications` | Создать отклик с начальным статусом `applied` |
-| GET | `/applications` | Показать отклики. Можно передать `?status=interview` |
+| POST | `/applications` | Создать отклик со статусом `applied`. Ответ `201` |
+| GET | `/applications` | Получить список. Пример фильтра: `?status=interview` |
 | GET | `/applications/{application_id}` | Получить отклик по ID |
 | PATCH | `/applications/{application_id}` | Изменить статус отклика |
+| DELETE | `/applications/{application_id}` | Удалить отклик. Ответ `204` без тела |
 
 Допустимые статусы — `applied`, `interview`, `offer` и `rejected`.
 
-## Локальный запуск
+## Локальный запуск на Windows
 
-Понадобятся Python 3.13, запущенный PostgreSQL и утилита `psql`. Команды ниже рассчитаны на PowerShell и выполняются из корня проекта.
+Понадобятся Python 3.13, запущенный PostgreSQL и утилита `psql`. Выполняй команды в PowerShell из корня проекта.
 
 **1. Создай виртуальное окружение и установи зависимости.**
 
@@ -26,53 +27,50 @@ py -3.13 -m venv .venv
 
 **2. Создай базу и таблицу откликов.**
 
-В командах используется локальная роль `postgres`. Если у тебя другая роль, которая может создавать базы и таблицы, подставь её имя здесь и в строке подключения.
+В примере используется локальная роль `postgres`. Если у тебя другая роль с правом создавать базы и таблицы, подставь её здесь и в строке подключения.
 
 ```powershell
 psql -h localhost -U postgres -d postgres -c "CREATE DATABASE internship_tracker;"
 psql -h localhost -U postgres -d internship_tracker -v ON_ERROR_STOP=1 -c (Get-Content -Raw app/sql/schema.sql)
 ```
 
-Если база уже существует, пропусти первую команду. Схему нужно применить один раз к пустой базе.
+Если база уже создана, пропусти первую команду. Схему примени один раз, пока таблицы `applications` в базе ещё нет.
 
-**3. Задай строку подключения и запусти приложение.**
+**3. Настрой подключение и запусти сервер.**
 
-Замени `example_password` паролем локальной роли PostgreSQL. Если в пароле есть специальные символы URL, их нужно закодировать. Храни реальный пароль вне репозитория.
+Создай локальный файл `app/.env` и задай строку подключения. Замени `example_password` своим паролем. Специальные символы в пароле нужно закодировать для URL. Файл с реальными настройками исключён из Git.
+
+```dotenv
+DATABASE_URL=postgresql://postgres:example_password@localhost:5432/internship_tracker
+```
 
 ```powershell
-$env:DATABASE_URL = 'postgresql://postgres:example_password@localhost:5432/internship_tracker'
-.\.venv\Scripts\python.exe -m uvicorn app.main:app
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --env-file app/.env
 ```
 
-Открой [документацию API](http://127.0.0.1:8000/docs).
+`--env-file` загружает `DATABASE_URL` из файла. В Uvicorn 0.54.0 на Windows режим `--reload` выбирает цикл событий `SelectorEventLoop`, совместимый с асинхронным psycopg.
 
-## Первый запрос
+Открой [Swagger UI](http://127.0.0.1:8000/docs).
 
-В Swagger UI вызови `POST /applications` и отправь JSON:
+## Пробный сценарий
 
-```json
-{
-  "company": "Example Bank",
-  "position": "Python Intern"
-}
-```
-
-Ответ `201 Created` содержит ID нового отклика и статус `applied`. Используй этот ID в `GET /applications/{application_id}`, затем отправь `{"status": "interview"}` в `PATCH /applications/{application_id}`. После обновления отклик должен появиться в `GET /applications?status=interview`.
+1. Вызови `POST /applications` и передай `{"company": "Example Bank", "position": "Python Intern"}`. Ожидай `201` и статус `applied`. Сохрани полученный ID.
+2. Вызови `PATCH /applications/{application_id}` с этим ID и телом `{"status": "interview"}`.
+3. Проверь новый статус через `GET /applications/{application_id}`. Созданный отклик также должен быть в `GET /applications?status=interview`.
+4. Удали отклик через `DELETE /applications/{application_id}`. Ожидай `204` без тела, а при следующем GET по тому же ID — `404`.
 
 ## Структура проекта
 
-- `app/main.py` — приложение FastAPI и маршруты.
+- `app/main.py` — создание FastAPI, подключение роутера и управление пулом.
+- `app/api/applications.py` — HTTP-маршруты откликов.
 - `app/models.py` — модели запросов и ответов.
-- `app/storage.py` — SQL-запросы через psycopg.
-- `app/db.py` — подключение к PostgreSQL.
+- `app/storage.py` — параметризованные SQL-запросы через psycopg.
 - `app/sql/schema.sql` — схема таблицы откликов.
-- `tests/test_applications.py` — тест маршрута обновления статуса.
+- `tests/` — автоматические проверки.
 
-## Тесты
+## Запуск тестов
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q
 ```
-
-Тест PATCH подменяет функцию обновления и проверяет HTTP-ответ и однократный вызов функции. Для этого теста подключение к PostgreSQL не требуется.
 
